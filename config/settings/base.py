@@ -94,8 +94,8 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
-    "authenbite.users",
-    "authenbite.restaurants",
+    "authenbite.users.apps.UsersConfig",
+    "authenbite.restaurants.apps.RestaurantsConfig",
     # Your stuff: custom apps go here
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps

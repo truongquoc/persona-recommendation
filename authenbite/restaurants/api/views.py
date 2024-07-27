@@ -1,5 +1,6 @@
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
+from django.db.models import Q
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
@@ -51,13 +52,20 @@ class RestaurantViewSet(
 
         suggest = self.request.query_params.get("suggest", "").lower() == "true"
         if suggest and user.is_authenticated:
-            preferences = UserPreference.objects.get(user=user)
-            queryset = (
-                queryset.filter(
-                    cuisines__in=preferences.favorite_cuisines.all(),
-                    price_level__lte=preferences.preferred_price_level,
-                    rating__gte=preferences.preferred_rating,
+            preferences, created = UserPreference.objects.get_or_create(user=user)
+
+            filter_conditions = Q()
+            if preferences.favorite_cuisines.exists():
+                filter_conditions |= Q(cuisines__in=preferences.favorite_cuisines.all())
+            if preferences.preferred_price_level:
+                filter_conditions |= Q(
+                    price_level__lte=preferences.preferred_price_level
                 )
+            if preferences.preferred_rating:
+                filter_conditions |= Q(rating__gte=preferences.preferred_rating)
+
+            queryset = (
+                queryset.filter(filter_conditions)
                 .exclude(
                     userrestaurantinteraction__user=user,
                     userrestaurantinteraction__liked=False,
@@ -101,20 +109,27 @@ class RestaurantViewSet(
 
         if persona:
             if persona.name == Persona.ESCAPIST:
-                queryset = queryset.order_by("-adventure_rating", "-rating")[:5]
+                queryset = queryset.order_by("-adventure_rating", "-rating")
             elif persona.name == Persona.LEARNER:
-                queryset = queryset.order_by("-cultural_significance", "-rating")[:5]
+                queryset = queryset.order_by("-cultural_significance", "-rating")
             elif persona.name == Persona.PLANNER:
                 queryset = queryset.filter(planning_friendly=True).order_by(
                     "-rating", "price_level"
-                )[:5]
+                )
             elif persona.name == Persona.DREAMER:
                 queryset = queryset.filter(instagram_worthy=True).order_by(
                     "-instagram_worthiness", "-rating"
-                )[:5]
+                )
 
+        # Apply pagination
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        # If pagination is not required
         serializer = self.get_serializer(queryset, many=True)
-        return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
 
     @action(detail=False, methods=["GET"], permission_classes=[IsAuthenticated])
     def search(self, request):

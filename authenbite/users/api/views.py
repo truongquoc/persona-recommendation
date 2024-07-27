@@ -6,11 +6,17 @@ from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, UpdateModelMixin
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet
+from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
-from authenbite.users.models import User
+from authenbite.users.models import Persona, User, UserProfile
 
-from .serializers import UserCreateSerializer, UserSerializer
+from .serializers import PersonaSerializer, UserCreateSerializer, UserSerializer
+
+
+class PersonaViewSet(ReadOnlyModelViewSet):
+    queryset = Persona.objects.all()
+    serializer_class = PersonaSerializer
+    permission_classes = [AllowAny]  # Allow any user to view personas
 
 
 class UserViewSet(RetrieveModelMixin, ListModelMixin, UpdateModelMixin, GenericViewSet):
@@ -47,14 +53,17 @@ class UserViewSet(RetrieveModelMixin, ListModelMixin, UpdateModelMixin, GenericV
             user.set_password(create_serializer.validated_data["password"])
             user.save()
 
+            # Create UserProfile
+            UserProfile.objects.create(user=user)
+
             # Use UserSerializer with context for the response
             user_serializer = UserSerializer(user, context={"request": request})
             return Response(user_serializer.data, status=status.HTTP_201_CREATED)
         return Response(create_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=True, methods=["post"])
-    def set_persona(self, request, pk=None):
-        user = self.get_object()
+    @action(detail=False, methods=["post"])
+    def set_persona(self, request):
+        user = request.user
         persona = get_object_or_404(Persona, name=request.data.get("persona"))
         user.profile.persona = persona
         user.profile.save()
