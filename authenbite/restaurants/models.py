@@ -1,6 +1,10 @@
+from datetime import datetime
+
 from django.contrib.auth import get_user_model
 from django.contrib.gis.db import models
 from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db.models import F, Func
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -10,6 +14,32 @@ class Cuisine(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class RestaurantManager(models.Manager):
+    def open_now(self):
+        current_time = timezone.localtime()
+        day_name = current_time.strftime("%A")
+        current_minutes = current_time.hour * 60 + current_time.minute
+
+        return (
+            self.filter(opening_hours__has_key=day_name)
+            .annotate(
+                start_minutes=Func(
+                    F("opening_hours"),
+                    day_name,
+                    function="jsonb_extract_path_text",
+                    output_field=models.IntegerField(),
+                ),
+                end_minutes=Func(
+                    F("opening_hours"),
+                    day_name,
+                    function="jsonb_extract_path_text",
+                    output_field=models.IntegerField(),
+                ),
+            )
+            .filter(start_minutes__lte=current_minutes, end_minutes__gt=current_minutes)
+        )
 
 
 class Restaurant(models.Model):
@@ -37,6 +67,58 @@ class Restaurant(models.Model):
         default=5, validators=[MinValueValidator(1), MaxValueValidator(10)]
     )
     main_image_url = models.URLField(blank=True, null=True)
+    vegan_options = models.BooleanField(default=False)
+    # New fields for opening hours and review summary
+    review_summary = models.TextField(blank=True, null=True)
+    opening_hours = models.JSONField(null=True, blank=True)
+    opening_hours_display = models.TextField(blank=True, null=True)
+
+    objects = RestaurantManager()
+
+    def is_open(self, current_time=None):
+        if not self.opening_hours:
+            return False
+
+        if current_time is None:
+            current_time = timezone.localtime()
+
+        day_name = current_time.strftime("%A")
+        current_minutes = current_time.hour * 60 + current_time.minute
+
+        if day_name in self.opening_hours:
+            start_minutes, end_minutes = self.opening_hours[day_name]
+            return start_minutes <= current_minutes < end_minutes
+
+        return False
+
+    def set_opening_hours(self, hours_data):
+        self.opening_hours = [[] for _ in range(7)]
+        days = [
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+        ]
+        for day_data in hours_data:
+            day = days.index(day_data["day"].lower())
+            for hour_range in day_data["hours"].split(", "):
+                start, end = hour_range.split(" to ")
+                start_minutes = self.time_to_minutes(start)
+                end_minutes = self.time_to_minutes(end)
+                self.opening_hours[day].append([start_minutes, end_minutes, 0])
+        self.opening_hours_display = str(hours_data)
+
+    @staticmethod
+    def time_to_minutes(time_str):
+        t = datetime.strptime(time_str, "%I %p").time()
+        return t.hour * 60 + t.minute
+
+    @staticmethod
+    def minutes_to_time(minutes):
+        return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
     def __str__(self):
         return self.name
