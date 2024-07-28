@@ -37,12 +37,11 @@ class Command(BaseCommand):
                     },
                 )
 
-                offerings = restaurant_data.get("Offerings", [])
+                offerings = restaurant_data["additionalInfo"].get("Offerings", [])
                 for offering in offerings:
-
-                    restaurant.vegan_options = bool(
-                        offering.get("Vegan options", False)
-                    )
+                    if "Vegan options" in offering:
+                        vegan_options = offering["Vegan options"]
+                        restaurant.vegan_options = vegan_options
 
                 # Set location
                 if "location" in restaurant_data:
